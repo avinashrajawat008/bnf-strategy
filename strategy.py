@@ -5,9 +5,8 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
-import time as tm
-import schedule
-import requests
+import json
+import os
 
 # ========== CONFIGURATION ==========
 SYMBOLS = [
@@ -22,15 +21,29 @@ TARGET_PTS = 100
 STOP_PTS = 70
 TRADE_MODE = "BOTH"
 
-# Global variables
-trade_taken = False
-position = None
-entry_price = 0
-entry_time_str = ""
+# State file (trade_taken, position, entry_price)
+STATE_FILE = "state.json"
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, 'r') as f:
+            return json.load(f)
+    return {'trade_taken': False, 'position': None, 'entry_price': 0}
+
+def save_state(state):
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f)
+
+def reset_daily():
+    state = load_state()
+    state['trade_taken'] = False
+    state['position'] = None
+    state['entry_price'] = 0
+    save_state(state)
+    print("🔄 New day, flags reset")
 
 # ========== DATA FETCH ==========
 def fetch_latest_data():
-    """Fetch latest 1-minute data for all symbols"""
     try:
         data = {}
         bnf = yf.download(BNF_SYMBOL, period="3m", interval="1m", progress=False)
@@ -43,7 +56,6 @@ def fetch_latest_data():
             if len(stock) < 2:
                 return None
             data[sym] = stock
-        
         return data
     except Exception as e:
         print(f"Data fetch error: {e}")
@@ -51,10 +63,8 @@ def fetch_latest_data():
 
 # ========== CALCULATION ==========
 def calculate_contribution(data):
-    """Calculate pull_sum and drag_sum_abs"""
     bnf_curr = data['bnf']['Close'].iloc[-1]
     bnf_prev = data['bnf']['Close'].iloc[-2]
-    
     bnf_open = data['bnf']['Open'].iloc[-2]
     bnf_high = data['bnf']['High'].iloc[-2]
     bnf_low = data['bnf']['Low'].iloc[-2]
@@ -63,18 +73,15 @@ def calculate_contribution(data):
     for i, sym in enumerate(SYMBOLS):
         stock_curr = data[sym]['Close'].iloc[-1]
         stock_prev = data[sym]['Close'].iloc[-2]
-        
         if stock_prev != 0:
             pct_change = (stock_curr - stock_prev) / stock_prev * 100
         else:
             pct_change = 0
-        
         impact = bnf_curr * (WEIGHTS[i]/100) * (pct_change/100)
         impacts.append(impact)
     
     pull_sum = sum(max(imp, 0) for imp in impacts)
     drag_sum_abs = abs(sum(min(imp, 0) for imp in impacts))
-    
     bnf_move = abs(bnf_curr - bnf_prev)
     bnf_up = bnf_prev > bnf_open
     bnf_down = bnf_prev < bnf_open
@@ -89,26 +96,16 @@ def calculate_contribution(data):
     is_hammer = lower_wick > body * 2 and upper_wick < body * 0.5
     is_shooting = upper_wick > body * 2 and lower_wick < body * 0.5
     
-    ce_pattern = is_hammer or is_doji
-    pe_pattern = is_shooting or is_doji
-    
     return {
-        'pull_sum': pull_sum,
-        'drag_sum_abs': drag_sum_abs,
-        'bnf_move': bnf_move,
-        'bnf_up': bnf_up,
-        'bnf_down': bnf_down,
-        'bnf_mid': bnf_mid,
-        'bnf_high': bnf_high,
-        'bnf_low': bnf_low,
+        'pull_sum': pull_sum, 'drag_sum_abs': drag_sum_abs,
+        'bnf_move': bnf_move, 'bnf_up': bnf_up, 'bnf_down': bnf_down,
+        'bnf_mid': bnf_mid, 'bnf_high': bnf_high, 'bnf_low': bnf_low,
         'bnf_curr': bnf_curr,
-        'ce_pattern': ce_pattern,
-        'pe_pattern': pe_pattern
+        'ce_pattern': is_hammer or is_doji,
+        'pe_pattern': is_shooting or is_doji
     }
 
-# ========== ENTRY/EXIT LOGIC ==========
 def check_signals(calc, current_price):
-    """Check entry conditions"""
     ce_signal = False
     pe_signal = False
     
@@ -132,120 +129,82 @@ def check_signals(calc, current_price):
     
     return ce_signal, pe_signal
 
-# ========== TELEGRAM NOTIFICATION ==========
-def send_telegram(message):
-    """Send notification via Telegram (optional)"""
-    try:
-        # Replace with your bot token and chat ID
-        BOT_TOKEN = "YOUR_BOT_TOKEN"
-        CHAT_ID = "YOUR_CHAT_ID"
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {"chat_id": CHAT_ID, "text": message}
-        requests.post(url, data=data)
-    except:
-        pass
-
-# ========== MAIN LOGIC ==========
-def run_strategy():
-    global trade_taken, position, entry_price, entry_time_str
-    
+# ========== MAIN ==========
+if __name__ == "__main__":
     now = datetime.now()
+    print(f"🕐 Run time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Reset at 9:15 AM
-    if now.hour == 9 and now.minute == 15 and now.second < 10:
-        trade_taken = False
-        position = None
-        entry_price = 0
-        print("🔄 New day started, flags reset")
+    if now.hour == 9 and now.minute == 15:
+        reset_daily()
     
-    # Check market hours (9:16 AM to 3:19 PM)
+    # Market hours check
     if not (time(9, 16) <= now.time() <= time(15, 19)):
-        return
+        print("⏰ Outside market hours")
+        exit()
     
-    # After 3:19 PM, exit all positions
-    if now.time() >= time(15, 19) and position:
-        print(f"🔴 EOD EXIT {position}")
-        send_telegram(f"🔴 EOD EXIT {position}")
-        position = None
-        entry_price = 0
-        return
+    state = load_state()
     
-    # Fetch data
+    # EOD exit
+    if now.time() >= time(15, 19) and state['position']:
+        print(f"🔴 EOD EXIT {state['position']}")
+        state['position'] = None
+        state['entry_price'] = 0
+        save_state(state)
+        exit()
+    
     data = fetch_latest_data()
     if data is None:
-        print("❌ Data fetch failed, retrying...")
-        return
+        print("❌ Data fetch failed")
+        exit()
     
-    # Calculate
     calc = calculate_contribution(data)
     current_price = calc['bnf_curr']
-    current_time = now.strftime("%H:%M:%S")
     
-    print(f"📊 {current_time} | BNF: {current_price:.2f} | Pull: {calc['pull_sum']:.2f} | Drag: {calc['drag_sum_abs']:.2f}")
+    print(f"📊 BNF: {current_price:.2f} | Pull: {calc['pull_sum']:.2f} | Drag: {calc['drag_sum_abs']:.2f}")
     
     # Exit check
-    if position and entry_price > 0:
-        move = current_price - entry_price
+    if state['position'] and state['entry_price'] > 0:
+        move = current_price - state['entry_price']
         
-        if position == 'CE':
+        if state['position'] == 'CE':
             if move >= TARGET_PTS:
-                print(f"🎯 CE TARGET HIT! Profit: {move:.2f} pts")
-                send_telegram(f"🎯 CE TARGET HIT! Profit: {move:.2f} pts, Entry: {entry_time_str}")
-                position = None
-                entry_price = 0
-                return
+                print(f"🎯 CE TARGET! Profit: {move:.0f} pts")
+                state['position'] = None
+                state['entry_price'] = 0
+                save_state(state)
             elif move <= -STOP_PTS:
-                print(f"🛑 CE STOP LOSS! Loss: {move:.2f} pts")
-                send_telegram(f"🛑 CE STOP LOSS! Loss: {move:.2f} pts, Entry: {entry_time_str}")
-                position = None
-                entry_price = 0
-                return
+                print(f"🛑 CE SL! Loss: {move:.0f} pts")
+                state['position'] = None
+                state['entry_price'] = 0
+                save_state(state)
         
-        elif position == 'PE':
+        elif state['position'] == 'PE':
             if move <= -TARGET_PTS:
-                print(f"🎯 PE TARGET HIT! Profit: {-move:.2f} pts")
-                send_telegram(f"🎯 PE TARGET HIT! Profit: {-move:.2f} pts, Entry: {entry_time_str}")
-                position = None
-                entry_price = 0
-                return
+                print(f"🎯 PE TARGET! Profit: {-move:.0f} pts")
+                state['position'] = None
+                state['entry_price'] = 0
+                save_state(state)
             elif move >= STOP_PTS:
-                print(f"🛑 PE STOP LOSS! Loss: {move:.2f} pts")
-                send_telegram(f"🛑 PE STOP LOSS! Loss: {move:.2f} pts, Entry: {entry_time_str}")
-                position = None
-                entry_price = 0
-                return
+                print(f"🛑 PE SL! Loss: {move:.0f} pts")
+                state['position'] = None
+                state['entry_price'] = 0
+                save_state(state)
     
     # Entry check
-    if not trade_taken and not position:
+    if not state['trade_taken'] and not state['position']:
         ce_signal, pe_signal = check_signals(calc, current_price)
         
         if ce_signal and TRADE_MODE in ["BOTH", "BUY_ONLY"]:
             print(f"🟢 BUY CE at {current_price:.2f}")
-            send_telegram(f"🟢 BUY CE at {current_price:.2f}")
-            position = 'CE'
-            entry_price = current_price
-            trade_taken = True
-            entry_time_str = current_time
+            state['position'] = 'CE'
+            state['entry_price'] = current_price
+            state['trade_taken'] = True
+            save_state(state)
         
         elif pe_signal and TRADE_MODE in ["BOTH", "SELL_ONLY"]:
             print(f"🔴 BUY PE at {current_price:.2f}")
-            send_telegram(f"🔴 BUY PE at {current_price:.2f}")
-            position = 'PE'
-            entry_price = current_price
-            trade_taken = True
-            entry_time_str = current_time
-
-# ========== SCHEDULER ==========
-print("🚀 Bank Nifty Contribution Strategy Started!")
-print(f"📋 Config: Target={TARGET_PTS}pts, SL={STOP_PTS}pts, Mode={TRADE_MODE}")
-print("⏰ Waiting for market hours (9:16 AM - 3:19 PM)...")
-
-# Run every 30 seconds
-schedule.every(30).seconds.do(run_strategy)
-
-# Also run immediately
-run_strategy()
-
-while True:
-    schedule.run_pending()
-    tm.sleep(1)
+            state['position'] = 'PE'
+            state['entry_price'] = current_price
+            state['trade_taken'] = True
+            save_state(state)
