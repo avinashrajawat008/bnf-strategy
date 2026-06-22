@@ -24,9 +24,11 @@ jobs:
     - name: Run strategy
       run: python strategy.py
     
-    - name: Upload Logs
+    - name: Upload state
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: trading-log
-        path: trading_log.txt
+        name: strategy-state
+        path: |
+          state.json
+          trading_log.txt
