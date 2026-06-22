@@ -1,12 +1,20 @@
-import warnings
-warnings.filterwarnings('ignore')
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
 import json
 import os
+
+# ========== LOAD CONFIG ==========
+def load_config():
+    try:
+        with open("config.json", "r") as f:
+            config = json.load(f)
+        return config.get("trade_mode", "BOTH")
+    except:
+        return "BOTH"
+
+TRADE_MODE = load_config()
 
 # ========== CONFIGURATION ==========
 SYMBOLS = [
@@ -19,9 +27,8 @@ BNF_SYMBOL = "^NSEBANK"
 
 TARGET_PTS = 100
 STOP_PTS = 70
-TRADE_MODE = "BOTH"
 
-# State file (trade_taken, position, entry_price)
+# ========== STATE MANAGEMENT ==========
 STATE_FILE = "state.json"
 
 def load_state():
@@ -33,14 +40,6 @@ def load_state():
 def save_state(state):
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f)
-
-def reset_daily():
-    state = load_state()
-    state['trade_taken'] = False
-    state['position'] = None
-    state['entry_price'] = 0
-    save_state(state)
-    print("🔄 New day, flags reset")
 
 # ========== DATA FETCH ==========
 def fetch_latest_data():
@@ -133,10 +132,7 @@ def check_signals(calc, current_price):
 if __name__ == "__main__":
     now = datetime.now()
     print(f"🕐 Run time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Reset at 9:15 AM
-    if now.hour == 9 and now.minute == 15:
-        reset_daily()
+    print(f"🔄 Trade Mode: {TRADE_MODE}")
     
     # Market hours check
     if not (time(9, 16) <= now.time() <= time(15, 19)):
@@ -144,6 +140,15 @@ if __name__ == "__main__":
         exit()
     
     state = load_state()
+    
+    # Reset at 9:15 AM
+    if now.hour == 9 and now.minute == 15:
+        state['trade_taken'] = False
+        state['position'] = None
+        state['entry_price'] = 0
+        save_state(state)
+        print("🔄 New day, flags reset")
+        exit()
     
     # EOD exit
     if now.time() >= time(15, 19) and state['position']:
@@ -173,11 +178,13 @@ if __name__ == "__main__":
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                exit()
             elif move <= -STOP_PTS:
-                print(f"🛑 CE SL! Loss: {move:.0f} pts")
+                print(f"🛑 CE STOP LOSS! Loss: {move:.0f} pts")
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                exit()
         
         elif state['position'] == 'PE':
             if move <= -TARGET_PTS:
@@ -185,11 +192,13 @@ if __name__ == "__main__":
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                exit()
             elif move >= STOP_PTS:
-                print(f"🛑 PE SL! Loss: {move:.0f} pts")
+                print(f"🛑 PE STOP LOSS! Loss: {move:.0f} pts")
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                exit()
     
     # Entry check
     if not state['trade_taken'] and not state['position']:
