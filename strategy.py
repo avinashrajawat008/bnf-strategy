@@ -34,24 +34,28 @@ STATE_FILE = "state.json"
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r') as f:
-            return json.load(f)
+            state = json.load(f)
+            print(f"📁 Loaded state: {state}")
+            return state
+    print("📁 No state file found, using default")
     return {'trade_taken': False, 'position': None, 'entry_price': 0}
 
 def save_state(state):
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f)
+    print(f"💾 Saved state: {state}")
 
 # ========== DATA FETCH ==========
 def fetch_latest_data():
     try:
         data = {}
-        bnf = yf.download(BNF_SYMBOL, period="3m", interval="1m", progress=False)
+        bnf = yf.download(BNF_SYMBOL, period="1d", interval="1m", progress=False)
         if len(bnf) < 2:
             return None
         data['bnf'] = bnf
         
         for sym in SYMBOLS:
-            stock = yf.download(sym, period="3m", interval="1m", progress=False)
+            stock = yf.download(sym, period="1d", interval="1m", progress=False)
             if len(stock) < 2:
                 return None
             data[sym] = stock
@@ -134,14 +138,12 @@ if __name__ == "__main__":
     print(f"🕐 Run time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🔄 Trade Mode: {TRADE_MODE}")
     
-    # Market hours check
     if not (time(9, 16) <= now.time() <= time(15, 19)):
         print("⏰ Outside market hours")
         exit()
     
     state = load_state()
     
-    # Reset at 9:15 AM
     if now.hour == 9 and now.minute == 15:
         state['trade_taken'] = False
         state['position'] = None
@@ -150,7 +152,6 @@ if __name__ == "__main__":
         print("🔄 New day, flags reset")
         exit()
     
-    # EOD exit
     if now.time() >= time(15, 19) and state['position']:
         print(f"🔴 EOD EXIT {state['position']}")
         state['position'] = None
