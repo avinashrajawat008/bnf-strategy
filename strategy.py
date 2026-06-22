@@ -4,6 +4,26 @@ import numpy as np
 from datetime import datetime, time
 import json
 import os
+import sys
+
+# ========== LOGGING SETUP ==========
+LOG_FILE = "trading_log.txt"
+
+class Logger:
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        self.log = open(filename, "a", encoding="utf-8")
+    
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+    
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+# Redirect all print output to both terminal and log file
+sys.stdout = Logger(LOG_FILE)
 
 # ========== LOAD CONFIG ==========
 def load_config():
@@ -140,6 +160,7 @@ if __name__ == "__main__":
     
     if not (time(9, 16) <= now.time() <= time(15, 19)):
         print("⏰ Outside market hours")
+        sys.stdout.log.close()  # Close log file properly
         exit()
     
     state = load_state()
@@ -150,6 +171,7 @@ if __name__ == "__main__":
         state['entry_price'] = 0
         save_state(state)
         print("🔄 New day, flags reset")
+        sys.stdout.log.close()
         exit()
     
     if now.time() >= time(15, 19) and state['position']:
@@ -157,11 +179,13 @@ if __name__ == "__main__":
         state['position'] = None
         state['entry_price'] = 0
         save_state(state)
+        sys.stdout.log.close()
         exit()
     
     data = fetch_latest_data()
     if data is None:
         print("❌ Data fetch failed")
+        sys.stdout.log.close()
         exit()
     
     calc = calculate_contribution(data)
@@ -179,12 +203,14 @@ if __name__ == "__main__":
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                sys.stdout.log.close()
                 exit()
             elif move <= -STOP_PTS:
                 print(f"🛑 CE STOP LOSS! Loss: {move:.0f} pts")
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                sys.stdout.log.close()
                 exit()
         
         elif state['position'] == 'PE':
@@ -193,12 +219,14 @@ if __name__ == "__main__":
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                sys.stdout.log.close()
                 exit()
             elif move >= STOP_PTS:
                 print(f"🛑 PE STOP LOSS! Loss: {move:.0f} pts")
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
+                sys.stdout.log.close()
                 exit()
     
     # Entry check
@@ -218,3 +246,6 @@ if __name__ == "__main__":
             state['entry_price'] = current_price
             state['trade_taken'] = True
             save_state(state)
+    
+    # Close log file properly at end of script
+    sys.stdout.log.close()
