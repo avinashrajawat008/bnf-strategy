@@ -1,9 +1,15 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, time
+from datetime import datetime, time, timezone, timedelta
 import json
 import os
+
+# ========== INDIAN TIMEZONE ==========
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def ist_now():
+    return datetime.now(IST)
 
 # ========== LOAD CONFIG ==========
 def load_config():
@@ -134,8 +140,8 @@ def check_signals(calc, current_price):
 
 # ========== MAIN ==========
 if __name__ == "__main__":
-    now = datetime.now()
-    print(f"🕐 Run time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    now = ist_now()
+    print(f"🕐 Run time (IST): {now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🔄 Trade Mode: {TRADE_MODE}")
     
     if not (time(9, 16) <= now.time() <= time(15, 19)):
