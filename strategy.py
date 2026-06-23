@@ -40,10 +40,12 @@ STATE_FILE = "state.json"
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r') as f:
-            state = json.load(f)
-            print(f"📁 Loaded state: {state}")
-            return state
-    print("📁 No state file found, using default")
+            content = f.read().strip()
+            if content:
+                state = json.loads(content)
+                print(f"📁 Loaded state: {state}")
+                return state
+    print("📁 No valid state file found, using default")
     return {'trade_taken': False, 'position': None, 'entry_price': 0}
 
 def save_state(state):
@@ -58,35 +60,59 @@ def fetch_latest_data():
         bnf = yf.download(BNF_SYMBOL, period="1d", interval="1m", progress=False)
         if len(bnf) < 2:
             return None
+        # Drop any duplicate index to avoid Series issues
+        bnf = bnf[~bnf.index.duplicated(keep='last')]
         data['bnf'] = bnf
         
         for sym in SYMBOLS:
             stock = yf.download(sym, period="1d", interval="1m", progress=False)
             if len(stock) < 2:
                 return None
+            stock = stock[~stock.index.duplicated(keep='last')]
             data[sym] = stock
         return data
     except Exception as e:
         print(f"Data fetch error: {e}")
         return None
 
+# ========== SAFE SCALAR EXTRACTION ==========
+def safe_iloc(df, col, idx):
+    """Extract a single scalar value safely from DataFrame."""
+    try:
+        val = df[col].iloc[idx]
+        if isinstance(val, pd.Series):
+            val = val.item()  # Convert single-element Series to scalar
+        return val
+    except:
+        return None
+
 # ========== CALCULATION ==========
 def calculate_contribution(data):
-    bnf_curr = data['bnf']['Close'].iloc[-1]
-    bnf_prev = data['bnf']['Close'].iloc[-2]
-    bnf_open = data['bnf']['Open'].iloc[-2]
-    bnf_high = data['bnf']['High'].iloc[-2]
-    bnf_low = data['bnf']['Low'].iloc[-2]
+    bnf_curr = safe_iloc(data['bnf'], 'Close', -1)
+    bnf_prev = safe_iloc(data['bnf'], 'Close', -2)
+    bnf_open = safe_iloc(data['bnf'], 'Open', -2)
+    bnf_high = safe_iloc(data['bnf'], 'High', -2)
+    bnf_low  = safe_iloc(data['bnf'], 'Low', -2)
+    
+    if any(v is None for v in [bnf_curr, bnf_prev, bnf_open, bnf_high, bnf_low]):
+        print("❌ Missing BNF data")
+        return None
     
     impacts = []
     for i, sym in enumerate(SYMBOLS):
-        stock_curr = data[sym]['Close'].iloc[-1]
-        stock_prev = data[sym]['Close'].iloc[-2]
+        stock_curr = safe_iloc(data[sym], 'Close', -1)
+        stock_prev = safe_iloc(data[sym], 'Close', -2)
+        
+        if stock_curr is None or stock_prev is None:
+            impacts.append(0.0)
+            continue
+        
         if stock_prev != 0:
             pct_change = (stock_curr - stock_prev) / stock_prev * 100
         else:
-            pct_change = 0
-        impact = bnf_curr * (WEIGHTS[i]/100) * (pct_change/100)
+            pct_change = 0.0
+        
+        impact = bnf_curr * (WEIGHTS[i] / 100.0) * (pct_change / 100.0)
         impacts.append(impact)
     
     pull_sum = sum(max(imp, 0) for imp in impacts)
@@ -94,7 +120,7 @@ def calculate_contribution(data):
     bnf_move = abs(bnf_curr - bnf_prev)
     bnf_up = bnf_prev > bnf_open
     bnf_down = bnf_prev < bnf_open
-    bnf_mid = (bnf_high + bnf_low) / 2
+    bnf_mid = (bnf_high + bnf_low) / 2.0
     
     body = abs(bnf_prev - bnf_open)
     upper_wick = bnf_high - max(bnf_prev, bnf_open)
@@ -171,6 +197,10 @@ if __name__ == "__main__":
         exit()
     
     calc = calculate_contribution(data)
+    if calc is None:
+        print("❌ Calculation failed")
+        exit()
+    
     current_price = calc['bnf_curr']
     
     print(f"📊 BNF: {current_price:.2f} | Pull: {calc['pull_sum']:.2f} | Drag: {calc['drag_sum_abs']:.2f}")
