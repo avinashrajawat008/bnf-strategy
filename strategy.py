@@ -36,22 +36,35 @@ STOP_PTS = 70
 
 # ========== STATE MANAGEMENT ==========
 STATE_FILE = "state.json"
+DEFAULT_STATE = {'trade_taken': False, 'position': None, 'entry_price': 0}
 
 def load_state():
+    """हमेशा एक वैध state dictionary लौटाएं"""
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, 'r') as f:
-            content = f.read().strip()
-            if content:
-                state = json.loads(content)
-                print(f"📁 Loaded state: {state}")
-                return state
-    print("📁 No valid state file found, using default")
-    return {'trade_taken': False, 'position': None, 'entry_price': 0}
+        try:
+            with open(STATE_FILE, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    state = json.loads(content)
+                    # Ensure required keys exist
+                    for key in DEFAULT_STATE:
+                        if key not in state:
+                            state[key] = DEFAULT_STATE[key]
+                    print(f"📁 Loaded state: {state}")
+                    return state
+        except:
+            pass
+    # किसी भी खराबी पर डिफ़ॉल्ट state use करें
+    print("📁 Using default state")
+    return DEFAULT_STATE.copy()
 
 def save_state(state):
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f)
-    print(f"💾 Saved state: {state}")
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
+        print(f"💾 Saved state: {state}")
+    except Exception as e:
+        print(f"⚠️ Could not save state: {e}")
 
 # ========== DATA FETCH ==========
 def fetch_latest_data():
@@ -60,7 +73,6 @@ def fetch_latest_data():
         bnf = yf.download(BNF_SYMBOL, period="1d", interval="1m", progress=False)
         if len(bnf) < 2:
             return None
-        # Drop any duplicate index to avoid Series issues
         bnf = bnf[~bnf.index.duplicated(keep='last')]
         data['bnf'] = bnf
         
@@ -77,11 +89,10 @@ def fetch_latest_data():
 
 # ========== SAFE SCALAR EXTRACTION ==========
 def safe_iloc(df, col, idx):
-    """Extract a single scalar value safely from DataFrame."""
     try:
         val = df[col].iloc[idx]
         if isinstance(val, pd.Series):
-            val = val.item()  # Convert single-element Series to scalar
+            val = val.item()
         return val
     except:
         return None
@@ -174,17 +185,17 @@ if __name__ == "__main__":
         print("⏰ Outside market hours")
         exit()
     
-    state = load_state()
+    state = load_state()   # हमेशा valid state आएगी
     
+    # नए दिन की शुरुआत में फ्लैग रीसेट
     if now.hour == 9 and now.minute == 15:
-        state['trade_taken'] = False
-        state['position'] = None
-        state['entry_price'] = 0
+        state = DEFAULT_STATE.copy()
         save_state(state)
         print("🔄 New day, flags reset")
         exit()
     
-    if now.time() >= time(15, 19) and state['position']:
+    # EOD exit
+    if now.time() >= time(15, 19) and state.get('position'):
         print(f"🔴 EOD EXIT {state['position']}")
         state['position'] = None
         state['entry_price'] = 0
@@ -206,7 +217,7 @@ if __name__ == "__main__":
     print(f"📊 BNF: {current_price:.2f} | Pull: {calc['pull_sum']:.2f} | Drag: {calc['drag_sum_abs']:.2f}")
     
     # Exit check
-    if state['position'] and state['entry_price'] > 0:
+    if state.get('position') and state.get('entry_price', 0) > 0:
         move = current_price - state['entry_price']
         
         if state['position'] == 'CE':
@@ -238,7 +249,7 @@ if __name__ == "__main__":
                 exit()
     
     # Entry check
-    if not state['trade_taken'] and not state['position']:
+    if not state.get('trade_taken', False) and not state.get('position'):
         ce_signal, pe_signal = check_signals(calc, current_price)
         
         if ce_signal and TRADE_MODE in ["BOTH", "BUY_ONLY"]:
