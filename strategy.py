@@ -4,6 +4,7 @@ import numpy as np
 from datetime import datetime, time, timezone, timedelta
 import json
 import os
+import requests
 
 # ========== INDIAN TIMEZONE ==========
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -34,19 +35,31 @@ BNF_SYMBOL = "^NSEBANK"
 TARGET_PTS = 100
 STOP_PTS = 70
 
+# ========== TELEGRAM SETTINGS ==========
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+def send_telegram(message):
+    """Telegram पर मैसेज भेजें, अगर टोकन और चैट आईडी सेट हैं।"""
+    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+            requests.post(url, data=payload, timeout=10)
+        except Exception as e:
+            print(f"Telegram error: {e}")
+
 # ========== STATE MANAGEMENT ==========
 STATE_FILE = "state.json"
 DEFAULT_STATE = {'trade_taken': False, 'position': None, 'entry_price': 0}
 
 def load_state():
-    """हमेशा एक वैध state dictionary लौटाएं"""
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, 'r') as f:
                 content = f.read().strip()
                 if content:
                     state = json.loads(content)
-                    # Ensure required keys exist
                     for key in DEFAULT_STATE:
                         if key not in state:
                             state[key] = DEFAULT_STATE[key]
@@ -54,7 +67,6 @@ def load_state():
                     return state
         except:
             pass
-    # किसी भी खराबी पर डिफ़ॉल्ट state use करें
     print("📁 Using default state")
     return DEFAULT_STATE.copy()
 
@@ -185,18 +197,18 @@ if __name__ == "__main__":
         print("⏰ Outside market hours")
         exit()
     
-    state = load_state()   # हमेशा valid state आएगी
+    state = load_state()
     
-    # नए दिन की शुरुआत में फ्लैग रीसेट
     if now.hour == 9 and now.minute == 15:
         state = DEFAULT_STATE.copy()
         save_state(state)
         print("🔄 New day, flags reset")
         exit()
     
-    # EOD exit
     if now.time() >= time(15, 19) and state.get('position'):
-        print(f"🔴 EOD EXIT {state['position']}")
+        msg = f"🔴 EOD EXIT {state['position']} at {state.get('entry_price', 'N/A')}"
+        print(msg)
+        send_telegram(msg)
         state['position'] = None
         state['entry_price'] = 0
         save_state(state)
@@ -222,13 +234,17 @@ if __name__ == "__main__":
         
         if state['position'] == 'CE':
             if move >= TARGET_PTS:
-                print(f"🎯 CE TARGET! Profit: {move:.0f} pts")
+                msg = f"🎯 CE TARGET HIT! Profit: {move:.0f} pts, Entry: {state['entry_price']:.2f}, Exit: {current_price:.2f}"
+                print(msg)
+                send_telegram(msg)
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
                 exit()
             elif move <= -STOP_PTS:
-                print(f"🛑 CE STOP LOSS! Loss: {move:.0f} pts")
+                msg = f"🛑 CE STOP LOSS! Loss: {move:.0f} pts, Entry: {state['entry_price']:.2f}, Exit: {current_price:.2f}"
+                print(msg)
+                send_telegram(msg)
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
@@ -236,13 +252,17 @@ if __name__ == "__main__":
         
         elif state['position'] == 'PE':
             if move <= -TARGET_PTS:
-                print(f"🎯 PE TARGET! Profit: {-move:.0f} pts")
+                msg = f"🎯 PE TARGET HIT! Profit: {-move:.0f} pts, Entry: {state['entry_price']:.2f}, Exit: {current_price:.2f}"
+                print(msg)
+                send_telegram(msg)
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
                 exit()
             elif move >= STOP_PTS:
-                print(f"🛑 PE STOP LOSS! Loss: {move:.0f} pts")
+                msg = f"🛑 PE STOP LOSS! Loss: {move:.0f} pts, Entry: {state['entry_price']:.2f}, Exit: {current_price:.2f}"
+                print(msg)
+                send_telegram(msg)
                 state['position'] = None
                 state['entry_price'] = 0
                 save_state(state)
@@ -253,14 +273,18 @@ if __name__ == "__main__":
         ce_signal, pe_signal = check_signals(calc, current_price)
         
         if ce_signal and TRADE_MODE in ["BOTH", "BUY_ONLY"]:
-            print(f"🟢 BUY CE at {current_price:.2f}")
+            msg = f"🟢 BUY CE at {current_price:.2f}"
+            print(msg)
+            send_telegram(msg)
             state['position'] = 'CE'
             state['entry_price'] = current_price
             state['trade_taken'] = True
             save_state(state)
         
         elif pe_signal and TRADE_MODE in ["BOTH", "SELL_ONLY"]:
-            print(f"🔴 BUY PE at {current_price:.2f}")
+            msg = f"🔴 BUY PE at {current_price:.2f}"
+            print(msg)
+            send_telegram(msg)
             state['position'] = 'PE'
             state['entry_price'] = current_price
             state['trade_taken'] = True
