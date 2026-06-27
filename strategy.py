@@ -89,7 +89,7 @@ def fetch_latest_data():
             return None
         bnf = bnf[~bnf.index.duplicated(keep='last')]
         data['bnf'] = bnf
-        
+
         for sym in SYMBOLS:
             stock = yf.download(sym, period="1d", interval="1m", progress=False)
             if len(stock) < 2:
@@ -118,44 +118,44 @@ def calculate_contribution(data):
     bnf_open = safe_iloc(data['bnf'], 'Open', -2)
     bnf_high = safe_iloc(data['bnf'], 'High', -2)
     bnf_low  = safe_iloc(data['bnf'], 'Low', -2)
-    
+
     if any(v is None for v in [bnf_curr, bnf_prev, bnf_open, bnf_high, bnf_low]):
         print("❌ Missing BNF data")
         return None
-    
+
     impacts = []
     for i, sym in enumerate(SYMBOLS):
         stock_curr = safe_iloc(data[sym], 'Close', -1)
         stock_prev = safe_iloc(data[sym], 'Close', -2)
-        
+
         if stock_curr is None or stock_prev is None:
             impacts.append(0.0)
             continue
-        
+
         if stock_prev != 0:
             pct_change = (stock_curr - stock_prev) / stock_prev * 100
         else:
             pct_change = 0.0
-        
+
         impact = bnf_curr * (WEIGHTS[i] / 100.0) * (pct_change / 100.0)
         impacts.append(impact)
-    
+
     pull_sum = sum(max(imp, 0) for imp in impacts)
     drag_sum_abs = abs(sum(min(imp, 0) for imp in impacts))
     bnf_move = abs(bnf_curr - bnf_prev)
     bnf_up = bnf_prev > bnf_open
     bnf_down = bnf_prev < bnf_open
     bnf_mid = (bnf_high + bnf_low) / 2.0
-    
+
     body = abs(bnf_prev - bnf_open)
     upper_wick = bnf_high - max(bnf_prev, bnf_open)
     lower_wick = min(bnf_prev, bnf_open) - bnf_low
     total_range = bnf_high - bnf_low
-    
+
     is_doji = total_range > 0 and body < total_range * 0.1
     is_hammer = lower_wick > body * 2 and upper_wick < body * 0.5
     is_shooting = upper_wick > body * 2 and lower_wick < body * 0.5
-    
+
     return {
         'pull_sum': pull_sum, 'drag_sum_abs': drag_sum_abs,
         'bnf_move': bnf_move, 'bnf_up': bnf_up, 'bnf_down': bnf_down,
@@ -168,25 +168,25 @@ def calculate_contribution(data):
 def check_signals(calc, current_price):
     ce_signal = False
     pe_signal = False
-    
+
     ce_cond1 = calc['drag_sum_abs'] > calc['pull_sum'] and calc['bnf_down'] and (calc['bnf_move'] > calc['drag_sum_abs'])
     ce_cond2 = calc['pull_sum'] > calc['drag_sum_abs'] and calc['ce_pattern']
     ce_cond3 = calc['pull_sum'] > calc['drag_sum_abs'] and calc['bnf_up'] and (calc['bnf_move'] > calc['pull_sum'])
-    
+
     if ce_cond1 and current_price > calc['bnf_mid']:
         ce_signal = True
     elif (ce_cond2 or ce_cond3) and current_price > calc['bnf_high']:
         ce_signal = True
-    
+
     pe_cond1 = calc['pull_sum'] > calc['drag_sum_abs'] and calc['bnf_up'] and (calc['bnf_move'] > calc['pull_sum'])
     pe_cond2 = calc['drag_sum_abs'] > calc['pull_sum'] and calc['pe_pattern']
     pe_cond3 = calc['drag_sum_abs'] > calc['pull_sum'] and calc['bnf_down'] and (calc['bnf_move'] > calc['drag_sum_abs'])
-    
+
     if pe_cond1 and current_price < calc['bnf_mid']:
         pe_signal = True
     elif (pe_cond2 or pe_cond3) and current_price < calc['bnf_low']:
         pe_signal = True
-    
+
     return ce_signal, pe_signal
 
 # ========== MAIN ==========
@@ -195,23 +195,22 @@ if __name__ == "__main__":
     print(f"🕐 Run time (IST): {now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🔄 Trade Mode: {TRADE_MODE}")
 
-    # ----- DEBUG: Telegram credentials check -----
-    print(f"🔑 TELEGRAM_TOKEN: {'SET' if TELEGRAM_TOKEN else 'NOT SET'}")
-    print(f"📱 TELEGRAM_CHAT_ID: {'SET' if TELEGRAM_CHAT_ID else 'NOT SET'}")
-    # ---------------------------------------------
-    
+    # ===== TEMPORARY TEST =====
+    send_telegram("✅ Telegram test from GitHub Actions – working!")
+    # ==========================
+
     if not (time(9, 16) <= now.time() <= time(15, 19)):
         print("⏰ Outside market hours")
         exit()
-    
+
     state = load_state()
-    
+
     if now.hour == 9 and now.minute == 15:
         state = DEFAULT_STATE.copy()
         save_state(state)
         print("🔄 New day, flags reset")
         exit()
-    
+
     if now.time() >= time(15, 19) and state.get('position'):
         msg = f"🔴 EOD EXIT {state['position']} at {state.get('entry_price', 'N/A')}"
         print(msg)
@@ -220,25 +219,24 @@ if __name__ == "__main__":
         state['entry_price'] = 0
         save_state(state)
         exit()
-    
+
     data = fetch_latest_data()
     if data is None:
         print("❌ Data fetch failed")
         exit()
-    
+
     calc = calculate_contribution(data)
     if calc is None:
         print("❌ Calculation failed")
         exit()
-    
+
     current_price = calc['bnf_curr']
-    
     print(f"📊 BNF: {current_price:.2f} | Pull: {calc['pull_sum']:.2f} | Drag: {calc['drag_sum_abs']:.2f}")
-    
+
     # Exit check
     if state.get('position') and state.get('entry_price', 0) > 0:
         move = current_price - state['entry_price']
-        
+
         if state['position'] == 'CE':
             if move >= TARGET_PTS:
                 msg = f"🎯 CE TARGET HIT! Profit: {move:.0f} pts, Entry: {state['entry_price']:.2f}, Exit: {current_price:.2f}"
@@ -256,7 +254,7 @@ if __name__ == "__main__":
                 state['entry_price'] = 0
                 save_state(state)
                 exit()
-        
+
         elif state['position'] == 'PE':
             if move <= -TARGET_PTS:
                 msg = f"🎯 PE TARGET HIT! Profit: {-move:.0f} pts, Entry: {state['entry_price']:.2f}, Exit: {current_price:.2f}"
@@ -274,11 +272,11 @@ if __name__ == "__main__":
                 state['entry_price'] = 0
                 save_state(state)
                 exit()
-    
+
     # Entry check
     if not state.get('trade_taken', False) and not state.get('position'):
         ce_signal, pe_signal = check_signals(calc, current_price)
-        
+
         if ce_signal and TRADE_MODE in ["BOTH", "BUY_ONLY"]:
             msg = f"🟢 BUY CE at {current_price:.2f}"
             print(msg)
@@ -287,7 +285,7 @@ if __name__ == "__main__":
             state['entry_price'] = current_price
             state['trade_taken'] = True
             save_state(state)
-        
+
         elif pe_signal and TRADE_MODE in ["BOTH", "SELL_ONLY"]:
             msg = f"🔴 BUY PE at {current_price:.2f}"
             print(msg)
@@ -296,8 +294,3 @@ if __name__ == "__main__":
             state['entry_price'] = current_price
             state['trade_taken'] = True
             save_state(state)
-
-    # ----- TEST MESSAGE (remove after successful test) -----
-    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-        send_telegram("✅ GitHub Actions Telegram test successful!")
-    # --------------------------------------------------------
