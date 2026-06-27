@@ -195,6 +195,15 @@ if __name__ == "__main__":
     
     if not (time(9, 16) <= now.time() <= time(15, 19)):
         print("⏰ Outside market hours")
+        print(f"🔑 TELEGRAM_TOKEN: {'SET' if TELEGRAM_TOKEN else 'NOT SET'}")
+print(f"📱 TELEGRAM_CHAT_ID: {'SET' if TELEGRAM_CHAT_ID else 'NOT SET'}")
+
+if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+    print("📤 Attempting to send Telegram message...")
+    send_telegram("✅ GitHub Actions Telegram test successful!")
+    print("📤 Test message sent (check Telegram)")
+else:
+    print("❌ Telegram credentials not found. Check GitHub Secrets.")
         exit()
     
     state = load_state()
