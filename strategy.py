@@ -44,12 +44,9 @@ def send_telegram(message):
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-            response = requests.post(url, data=payload, timeout=10)
-            print(f"Telegram response: {response.status_code} - {response.text}")
+            requests.post(url, data=payload, timeout=10)
         except Exception as e:
             print(f"Telegram error: {e}")
-    else:
-        print("Telegram token or chat ID missing, skipping notification.")
 
 # ========== STATE MANAGEMENT ==========
 STATE_FILE = "state.json"
@@ -194,10 +191,6 @@ if __name__ == "__main__":
     now = ist_now()
     print(f"🕐 Run time (IST): {now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🔄 Trade Mode: {TRADE_MODE}")
-
-    # ===== TEMPORARY TEST =====
-    send_telegram("✅ Telegram test from GitHub Actions – working!")
-    # ==========================
 
     if not (time(9, 16) <= now.time() <= time(15, 19)):
         print("⏰ Outside market hours")
