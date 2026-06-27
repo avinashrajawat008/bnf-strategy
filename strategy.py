@@ -40,14 +40,16 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 def send_telegram(message):
-    """Telegram पर मैसेज भेजें, अगर टोकन और चैट आईडी सेट हैं।"""
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-            requests.post(url, data=payload, timeout=10)
+            response = requests.post(url, data=payload, timeout=10)
+            print(f"Telegram response: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"Telegram error: {e}")
+    else:
+        print("Telegram token or chat ID missing, skipping notification.")
 
 # ========== STATE MANAGEMENT ==========
 STATE_FILE = "state.json"
@@ -192,19 +194,15 @@ if __name__ == "__main__":
     now = ist_now()
     print(f"🕐 Run time (IST): {now.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🔄 Trade Mode: {TRADE_MODE}")
+
+    # ----- DEBUG: Telegram credentials check -----
+    print(f"🔑 TELEGRAM_TOKEN: {'SET' if TELEGRAM_TOKEN else 'NOT SET'}")
+    print(f"📱 TELEGRAM_CHAT_ID: {'SET' if TELEGRAM_CHAT_ID else 'NOT SET'}")
+    # ---------------------------------------------
     
     if not (time(9, 16) <= now.time() <= time(15, 19)):
         print("⏰ Outside market hours")
-        print(f"🔑 TELEGRAM_TOKEN: {'SET' if TELEGRAM_TOKEN else 'NOT SET'}")
-print(f"📱 TELEGRAM_CHAT_ID: {'SET' if TELEGRAM_CHAT_ID else 'NOT SET'}")
-
-if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
-    print("📤 Attempting to send Telegram message...")
-    send_telegram("✅ GitHub Actions Telegram test successful!")
-    print("📤 Test message sent (check Telegram)")
-else:
-    print("❌ Telegram credentials not found. Check GitHub Secrets.")
-    exit()
+        exit()
     
     state = load_state()
     
@@ -298,9 +296,8 @@ else:
             state['entry_price'] = current_price
             state['trade_taken'] = True
             save_state(state)
-            # ========== TEST TELEGRAM ==========
-print("📤 Sending test message to Telegram...")
-send_telegram("✅ GitHub Actions Telegram test successful!")
-print("📤 Test message sent (check Telegram)")
 
-            
+    # ----- TEST MESSAGE (remove after successful test) -----
+    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+        send_telegram("✅ GitHub Actions Telegram test successful!")
+    # --------------------------------------------------------
