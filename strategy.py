@@ -204,7 +204,7 @@ if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
     print("📤 Test message sent (check Telegram)")
 else:
     print("❌ Telegram credentials not found. Check GitHub Secrets.")
-        exit()
+    exit()
     
     state = load_state()
     
