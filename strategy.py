@@ -289,6 +289,9 @@ if __name__ == "__main__":
             state['entry_price'] = current_price
             state['trade_taken'] = True
             save_state(state)
-send_telegram("✅ Test message from GitHub Actions - Telegram working!")
+            # ========== TEST TELEGRAM ==========
+print("📤 Sending test message to Telegram...")
+send_telegram("✅ GitHub Actions Telegram test successful!")
+print("📤 Test message sent (check Telegram)")
 
             
